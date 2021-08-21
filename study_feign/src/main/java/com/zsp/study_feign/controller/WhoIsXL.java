@@ -1,0 +1,15 @@
+package com.zsp.study_feign.controller;
+
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("xiaolu/is")
+public class WhoIsXL {
+    @GetMapping("/me")
+    public String xiaoLu(){
+        return "My name is Xiaolu";
+    }
+}

@@ -7,19 +7,28 @@
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
+        <module name="xiaolu-dubbo" />
         <module name="study_demo" />
+        <module name="nacos_study" />
+        <module name="nacos_oepnfeign" />
         <module name="study_feign" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel target="8">
+      <module name="nacos_oepnfeign" target="1.8" />
+      <module name="nacos_study" target="1.8" />
       <module name="study_demo" target="1.8" />
       <module name="study_feign" target="1.8" />
+      <module name="xiaolu-dubbo" target="1.8" />
     </bytecodeTargetLevel>
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="nacos_oepnfeign" options="-parameters" />
+      <module name="nacos_study" options="-parameters" />
       <module name="study_demo" options="-parameters" />
       <module name="study_feign" options="-parameters" />
+      <module name="xiaolu-dubbo" options="-parameters" />
     </option>
   </component>
 </project>

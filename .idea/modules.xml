@@ -2,9 +2,12 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/nacos_oepnfeign/nacos_oepnfeign.iml" filepath="$PROJECT_DIR$/nacos_oepnfeign/nacos_oepnfeign.iml" />
+      <module fileurl="file://$PROJECT_DIR$/nacos_study/nacos_study.iml" filepath="$PROJECT_DIR$/nacos_study/nacos_study.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/netty-study.iml" filepath="$PROJECT_DIR$/.idea/netty-study.iml" />
       <module fileurl="file://$PROJECT_DIR$/study_demo/study_demo.iml" filepath="$PROJECT_DIR$/study_demo/study_demo.iml" />
       <module fileurl="file://$PROJECT_DIR$/study_feign/study_feign.iml" filepath="$PROJECT_DIR$/study_feign/study_feign.iml" />
+      <module fileurl="file://$PROJECT_DIR$/xiaolu-dubbo/xiaolu-dubbo.iml" filepath="$PROJECT_DIR$/xiaolu-dubbo/xiaolu-dubbo.iml" />
     </modules>
   </component>
 </project>

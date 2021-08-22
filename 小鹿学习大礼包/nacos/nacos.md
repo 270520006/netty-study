@@ -1,3 +1,5 @@
+
+
 # Nacos
 
 ### 什么是Nacos？
@@ -24,11 +26,11 @@ ps：
 
 nacos需要预先下载安装：
 
-* Windows版本的已经给小璐提前下载准备好了
+* Windows版本的已经给小露提前下载准备好了
   * 使用压缩包解压缩后在bin目录下打开startup.cmd即可
   * 登陆http://localhost:8848/nacos，不一定是8848端口，如果端口被占用得看启动后的日志
   * 用户名密码都是nacos
-* linux版本的压缩包也给小鹿提前下载准备好了
+* linux版本的压缩包也给小露提前下载准备好了
   * 先使用命令“tar -zxvf nacos-server-1.1.4.tar.gz ”解压
   * 然后到bin目录下，使用“sh startup.sh -m standalone”启动
   * 或者使用“bash startup.sh -m standalone”启动，用户名密码都一样
@@ -54,6 +56,14 @@ nacos/nacos-server
 
 #### nacos作为注册中心
 
+统一步骤：
+
+* 导入依赖
+* 写配置文件
+* 开启注解
+
+下面开始这三步：
+
 * 导入依赖
   * 可以在父模块下先规定alibaba.cloud的版本号此后就用cloud配件都不用写版本号了
 
@@ -71,6 +81,19 @@ nacos/nacos-server
         </dependencies>
     </dependencyManagement>
 ```
+
+boot版本号：写在开头
+
+```xml
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.2.6.RELEASE</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+```
+
+nacos版本号：
 
 ```xml
  <dependency>
@@ -226,4 +249,51 @@ public class XLController {
 
 ![image-20210822010621087](nacos/image-20210822010621087.png)
 
-学到这里小璐已经很棒了，要继续学配置中心的话，可以继续，但是要边学边做笔记哦~
+整体结构图：
+
+![img](nacos/img.it610.com&app=2002&size=f9999,10000&q=a80&n=0&g=0n&fmt=jpeg)
+
+ps:特别注意，一定不要用下划线命名~
+
+open Feign和dubbo是同一类的东西，区别在于：
+
+* open feign：使用的是http协议，只支持http协议，所以会相较于dubbo来说更慢点。
+
+* dubbo：支持多传输协议(Dubbo、Rmi、http、redis等等)，可以根据业务场景选择最佳的方式，使用了netty作为底层。
+
+#### nacos作为配置中心
+
+1.导入依赖
+
+```
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+</dependency>
+```
+
+2.新建bootstrap.properties
+
+```
+spring.application.name=nacos-zsp
+spring.cloud.nacos.config.server-addr=127.0.0.1:8848
+```
+
+3.在nacos上面新建发布
+
+![image-20210822160327079](nacos/image-20210822160327079.png)
+
+4.在配置类里面获取
+
+```java
+@Value("${zhuzhu.age}")
+private int age;
+@GetMapping("/age")
+public int xiaozhuzhu(){
+    return age;
+}
+```
+
+ps:需获取配置中的值时，需加上@RefreshScope注解
+
+接下来就到小璐表演时间了，我会在一旁协助，带小璐学习dubbo的使用。

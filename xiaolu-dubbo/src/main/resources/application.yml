@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: dubbo-zsp
+  cloud:
+    nacos:
+      server-addr: 127.0.0.1:8848
+
+server:
+  port: 8089
+
+
+dubbo:
+  application:
+    #name=服务名
+    name: dubbo-zsp
+    # 项目访问端口
+    qos-port: 8091
+  consumer:
+    check: false
+  scan:
+    # 上述的服务提供者的实现类所在的包
+    base-packages: com.xxx.test.dubbo
+  protocol:
+    #name=
+    name: dubbo
+    port: -1
+  registry:
+    #spring-cloud=托管到spring-cloud的注册中心，可改为nacos://10.21.32.22:123，但注册中心的每个dubbo服务会额外出现两个多余的服务，技术所限，原因未知。改为spring-cloud则无此毛病
+    address: spring-cloud://127.0.0.1

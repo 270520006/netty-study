@@ -127,13 +127,51 @@ java存在的Socket，以下是它API的类：
   * ServerSocketChannel
   * SocketChannel
 
-编写一段BIO服务器端进行Socket编程：
+模拟一段BIO服务器端进行Socket编程：
 
-![image-20210831083525868](netty-deep-study/image-20210831083525868.png)
+```java
+public class BIOServer {
+    public static void start(int port) throws IOException {
+        //1、建立socket连接
+        ServerSocket serverSocket = new ServerSocket();
+        //2、绑定和监听
+        serverSocket.bind(new InetSocketAddress(port),2);
+        //支持连接的端口号和连接数
+        //3、起线程跑连接，或者用线程池。
+        while (true){
+            final Socket clientSocket = serverSocket.accept();
+            System.out.println("accept");//标识接收到了请求
+            new Thread(()->{
+                try {
+                    BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                    PrintWriter out = new PrintWriter(clientSocket.getOutputStream(),true);
+                    String line = in.readLine();//阻塞
+                    while(line !=null){
+                        out.println(line);
+                        out.flush();
+                        line=in.readLine();
+                    }
+                    clientSocket.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
 
-![image-20210831083627666](netty-deep-study/image-20210831083627666.png)
+            });
+        }
+    }
 
-使用它：
+    public static void main(String[] args) throws IOException {
+        start(2020);
+    }
+}
+```
 
-![image-20210831083644467](netty-deep-study/image-20210831083644467.png)
+启动cmd然后和我们的程序建立连接：
 
+```shell
+telnet localhost 2020
+```
+
+然后执行cmd命令发现成功：
+
+![image-20210831210952341](netty-deep-study/image-20210831210952341.png)

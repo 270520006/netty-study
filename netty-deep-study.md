@@ -103,16 +103,37 @@
 * Socket()：初始化socket
 * Bind()：绑定一个端口
 * Listen()：监听端口。
-* Accept()：完成连接的建立。这个过程中服务器端需要维护两个队列。
-  * sync queue：将完成的封包放到队列里面去。
-  * accept queue：将完成的请求放到这个队列里去。
+* Accept()：完成连接的建立，Accept()这个过程就是显性的从接收队列里拿封包的过程。这个过程中服务器端需要维护两个队列。
+  * sync queue：将接收到的连接放到队列里面去。
+  * accept queue：将完成的连接放到这个队列里去。
 
-* Read()：
-* Write();
-* Close();
+* Read()/Write():可以给对方发消息或者接收消息。
+* Close():关闭连接。
 
 从listen到Accept这个过程就发生了三次握手。
 
 
 
 ![image-20210830082025456](netty-deep-study/image-20210830082025456.png)
+
+## BIO&NIO
+
+java存在的Socket，以下是它API的类：
+
+* BIO
+  * ServerSocket
+  * Socket
+* NIO
+  * ServerSocketChannel
+  * SocketChannel
+
+编写一段BIO服务器端进行Socket编程：
+
+![image-20210831083525868](netty-deep-study/image-20210831083525868.png)
+
+![image-20210831083627666](netty-deep-study/image-20210831083627666.png)
+
+使用它：
+
+![image-20210831083644467](netty-deep-study/image-20210831083644467.png)
+

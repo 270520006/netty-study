@@ -127,6 +127,10 @@ java存在的Socket，以下是它API的类：
   * ServerSocketChannel
   * SocketChannel
 
+### BIO 
+
+#### 案例 
+
 模拟一段BIO服务器端进行Socket编程：
 
 ```java
@@ -175,3 +179,65 @@ telnet localhost 2020
 然后执行cmd命令发现成功：
 
 ![image-20210831210952341](netty-deep-study/image-20210831210952341.png)
+
+#### 阻塞分析
+
+红色部分代表了阻塞，下面解释一下阻塞的原因：
+
+* accept:阻塞是因为网络传输的问题等
+* read&parse:需要解决字节边界问题，需要截取每个请求需要的字节。当收不到请求字节了，就要切换线程。当发送的请求断断续续的，每次接收一点就要切换一次后，阻塞就会非常严重。
+* write:接收方有缓存大小，类似于窗口大小，当接收到足够的数据包才会写出去。例如，需要数据包为1-5，但只接受到了2-5，那我们会一直堵塞，直到得到数据包1。
+
+![image-20210901171128845](netty-deep-study/image-20210901171128845.png)
+
+tcp也有自己的一套流量控制和拥塞控制算法，所以tcp天生拥有背压能力，能够很天然的适应流量弹性的变化。	
+
+#### 缺点
+
+​	上下文切换：在read&parse过程中，我们需要去切割字节，获取到对应的请求，但如果此时网络不畅，那么我们接收到的封包就会断断续续的，过了一段时间后就会切换下个线程。
+
+​	eg：如果A线程需要的数据是0-100，我的线程是A,B,C。刚开始A线程接收到50个数据，接下去因为网络原因无法接受到了，所以切换到了B或者C线程。这时候如果又来了10个A所需的数据又要切换到A接收，这样非常浪费时间。
+
+![image-20210901184959914](netty-deep-study/image-20210901184959914.png)
+
+总结：可以发现，当我们的连接数多了，我们传统的blocking的服务器模型，效率就很低了。为了解决BIO的上下文切换存在的问题，我们引出了NIO
+
+### NIO
+
+​	核心目标：减少线程数，减少上下文切换问题。
+
+​	解决办法：将accept、read&parse、write放入更为底层的部分，放入到一个线程中，由一个线程去统筹其他的线程来执行这些操作。比如说，当网络断断续续后，这个线程可以通知正在read过程中被阻塞的线程别阻塞了，切换到其他的Socket线程进行读。
+
+下面是NIO的模型，采用操作系统事件的机制，我们将统筹所有连接的线程称之为Selector：
+
+#### 模型解释
+
+​	负责多个Socket连接，当Socket的状态发生变化了，都会通知Selector。Selector会对所有的连接进行轮询（定时任务），做对应事件的事情，所以不会涉及到任何的浪费。
+
+![image-20210901193330804](netty-deep-study/image-20210901193330804.png)
+
+#### Selector API
+
+* channel.register(selector) ：注册监听
+* while(true)+ select()：轮询事件
+* selectedKeys()：获得selectionKey对象，表示channel的注册信息
+* SelectionKey.attach()对selectionkey：关联任何对象
+* isReadable()/ isAcceptable()/ isWritable()：判断事件类型
+* 事件类型：OP_ACCEPT/OP_READ/OP_WRITE/OP_CONNECT
+
+ #### 整体步骤
+
+* 第一步：把想要被Selector监听的ServerSocket注册到channel上
+* 第二步：无限轮询，然后去查看Socket的状态
+* 第三步： 一旦轮询到需要的对象，使用selectedKeys去获取对象
+* 第四步：根据事件类型（ACCEPT、READ、WRITE、CONNECT），根据这四种状态去进行相应的操作。
+
+#### 案例
+
+​	举例说明下NIO的步骤：
+
+![image-20210902083258009](netty-deep-study/image-20210902083258009.png)
+
+![image-20210902083524556](netty-deep-study/image-20210902083524556.png)
+
+![image-20210902083641073](netty-deep-study/image-20210902083641073.png)

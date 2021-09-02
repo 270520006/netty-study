@@ -94,7 +94,19 @@
 
 ### tcp四次挥手
 
+1、浏览器发送数据包给服务器，数据包里面包含 FIN=1（请求断开连接），Seq（身份码） 
 
+2、服务器发送数据包给浏览器，数据包含 ACK=1（表示确认断开连接）,ack=Seq+1（表示确 
+
+认身份）和自己的 Seq（身份码），此时处于等待关闭状态。 
+
+3、服务器发送数据包给浏览器，数据包含 FIN=1（请求断开连接）和自己的 Seq（身份码）， 
+
+此时处于最后确认状态。 
+
+4、浏览器发送数据包给服务器，数据包含 ACK=1（表示确认断开连接）和 ack=Seq+1，此时 
+
+连接关闭
 
 ### Socket API
 
@@ -227,17 +239,105 @@ tcp也有自己的一套流量控制和拥塞控制算法，所以tcp天生拥�
 
  #### 整体步骤
 
-* 第一步：把想要被Selector监听的ServerSocket注册到channel上
-* 第二步：无限轮询，然后去查看Socket的状态
-* 第三步： 一旦轮询到需要的对象，使用selectedKeys去获取对象
-* 第四步：根据事件类型（ACCEPT、READ、WRITE、CONNECT），根据这四种状态去进行相应的操作。
+* 把想要被Selector监听的ServerSocket注册到channel上
+* 无限轮询，然后去查看Socket的状态
+* 一旦轮询到需要的对象，使用selectedKeys去获取对象
+* 根据事件类型（ACCEPT、READ、WRITE、CONNECT），根据这四种状态去进行相应的操作。
 
 #### 案例
 
-​	举例说明下NIO的步骤：
+​	举例说明下步骤，一共七步走，
 
-![image-20210902083258009](netty-deep-study/image-20210902083258009.png)
+* 第一步：创建一个信道
+* 第二步：设置是否阻塞并设置端口号，这里要用NIO肯定是非阻塞的
+* 第三步：同BIN过程，绑定套接字地址,这里可以绑定多个，只要在后面加上.bin即可
+* 第四步：创建selector并绑定事件
+* 第五步：进行轮询，查看是否有注册过channel的状态得到了满足
+* 第六步：从selector中得到集合，但也有可能Socket状态都没改变，集合为空
+* 第七步：进入事件处理三步走
+  * 从信道中获取连接
+  * 同BIO过程，对其进行accept
+  * 设置连接非阻塞，并且转换连接的状态
 
-![image-20210902083524556](netty-deep-study/image-20210902083524556.png)
+```java
+public class NIOServer {
+    public static void start(int port) throws IOException {
+        //1、创建一个信道
+        ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
+        //2、设置是否阻塞并设置端口号，这里要用NIO肯定是非阻塞的
+        serverSocketChannel.configureBlocking(false);
+        InetSocketAddress address = new InetSocketAddress(port);
+        //3、同BIN过程，绑定套接字地址,这里可以绑定多个，只要在后面加上.bin即可
+        serverSocketChannel.bind(address);
+        //4、创建selector并绑定事件
+        Selector selector = Selector.open();
+        serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
+        while(true){ //这里如果只请求一次不会出错
+            //5、进行轮询，查看是否有注册过channel的状态得到了满足
+            //但是这块底层会有一些bug，因为非阻塞，所以while会空转
+            selector.select();
+            //6、从selector中得到集合，但也有可能Socket状态都没改变，集合为空
+            Set<SelectionKey> readyKeys = selector.selectedKeys();
+            Iterator<SelectionKey> it = readyKeys.iterator();
+            //7、进入事件处理三步走
+            while (it.hasNext()){ //进入事件处理三步走
+                SelectionKey key = it.next();
+                if (key.isAcceptable()){
+                    //(1)、从信道中获取连接
+                    ServerSocketChannel server = (ServerSocketChannel) key.channel();
+                    //(2)、同BIO过程，对其进行accept
+                    SocketChannel socket = server.accept();
+                    System.out.println("Accept !");
+                    //(3)、设置连接非阻塞，并且转换连接的状态
+                    socket.configureBlocking(false);
+                    socket.register(selector,SelectionKey.OP_READ);//将其从accept转换成read
+                    System.out.println("经历了一次状态转换过程");
+                }
+                if (key.isReadable()) {
+                    //(1)、从信道中获取连接
+                    SocketChannel socket = (SocketChannel) key.channel();
+                    //(2)创建字节流，接受传入的流
+                    final ByteBuffer buffer =ByteBuffer.allocate(64);
+                    final  int bytesRead =socket.read(buffer);//读取流
+                    if (bytesRead>0){
+                        buffer.flip();//翻转缓冲区，理解成刷新缓存
+                        int ret =socket.write(buffer);
+                        if (ret<=0){
+                            socket.register(selector,SelectionKey.OP_WRITE);
+                        }
+                        buffer.clear();
+                    } else  if (bytesRead<0){
+                        key.cancel();
+                        socket.close();
+                        System.out.println("Client close");
+                    }
+                }
+            }
+        }
+    }
+    public static void main(String[] args) throws IOException {
+        start(2020);
+    }
+}
+```
 
-![image-20210902083641073](netty-deep-study/image-20210902083641073.png)
+测试一下，运行程序，打开cmd连接端口号：
+
+```shell
+telnet localhost 2020
+```
+
+查看结果：
+
+![image-20210902170311648](netty-deep-study/image-20210902170311648.png)
+
+这里报错原因是因为存在while(true)的空转（因为NIO非阻塞），如果将while改成仅循环一次就没有问题
+
+#### 缺点
+
+* 空转问题(会报错):因为NIO是非阻塞的，所以当没有请求后，也不会阻塞。此时while(true)就会一直执行，直到吧内存占满。
+
+* 代码不好复用，如果我需要实现某一功能并没有BIO那么容易，也不好抽取出来成单独模块。
+
+  虽然NIO有缺点，但NIO的非阻塞和单线程处理Socket对效率的提升而言非常大，所以我们还是得用。往后我们就引入了**Reactor模式**，即**响应式编程**。
+

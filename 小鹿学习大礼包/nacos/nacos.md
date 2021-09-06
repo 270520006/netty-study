@@ -253,7 +253,7 @@ public class XLController {
 
 整体结构图：
 
-![img](nacos/img.it610.com&app=2002&size=f9999,10000&q=a80&n=0&g=0n&fmt=jpeg)
+![image-20210905143335219](nacos/image-20210905143335219.png)
 
 ps:特别注意，一定不要用下划线命名~
 

@@ -347,7 +347,9 @@ telnet localhost 2020
 
 ##### 案例
 
+![image-20210906083557686](netty-deep-study/image-20210906083557686.png)
 
+![image-20210906083614593](netty-deep-study/image-20210906083614593.png)
 
 ##### 缺点
 

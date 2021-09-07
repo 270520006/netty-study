@@ -347,6 +347,10 @@ telnet localhost 2020
 
 ##### 案例
 
+
+
+
+
 ![image-20210906083557686](netty-deep-study/image-20210906083557686.png)
 
 ![image-20210906083614593](netty-deep-study/image-20210906083614593.png)
@@ -413,7 +417,7 @@ Nginx、Swoole、Memcached和Netty都是采用这种实现。
 * 多线程切换在没有那么高并发的情况下，花销特别大。
 * 需要的硬件配置比先前两个高了
 
-##### 总结
+#### 总结
 
 Reactor模型具有如下的优点：
 

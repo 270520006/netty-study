@@ -9,11 +9,11 @@
 
 4、学习netty前，先学习了BIO和NIO并手写了demo，明白了两者的优缺点
 
-5、由NIO引入Reactor编程模式的学习，学习了四种模型
+5、由NIO引入Reactor编程模式的学习，学习了3种模型
 
 6、开始手写Reactor的第一个模型，单Reactor单线程的学习
 
-
+7、手写Reactor的第一个模型和理解完毕
 
 
 

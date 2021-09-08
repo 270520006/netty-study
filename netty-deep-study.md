@@ -94,7 +94,13 @@
 
 ### tcp四次挥手
 
+1、浏览器发送数据包给服务器，数据包里面包含 FIN=1（请求断开连接），Seq（身份码）
 
+ 2、服务器发送数据包给浏览器，数据包含 ACK=1（表示确认断开连接）,ack=Seq+1（表示确 认身份）和自己的 Seq（身份码），此时处于等待关闭状态。 
+
+3、服务器发送数据包给浏览器，数据包含 FIN=1（请求断开连接）和自己的 Seq（身份码）， 此时处于最后确认状态。 
+
+4、浏览器发送数据包给服务器，数据包含 ACK=1（表示确认断开连接）和 ack=Seq+1，此时 连接关闭
 
 ### Socket API
 
@@ -188,7 +194,7 @@ telnet localhost 2020
 * read&parse:需要解决字节边界问题，需要截取每个请求需要的字节。当收不到请求字节了，就要切换线程。当发送的请求断断续续的，每次接收一点就要切换一次后，阻塞就会非常严重。
 * write:接收方有缓存大小，类似于窗口大小，当接收到足够的数据包才会写出去。例如，需要数据包为1-5，但只接受到了2-5，那我们会一直堵塞，直到得到数据包1。
 
-![image-20210901171128845](netty-deep-study/image-20210901171128845.png)
+![image-20210907134505274](netty-deep-study/image-20210907134505274.png)
 
 tcp也有自己的一套流量控制和拥塞控制算法，所以tcp天生拥有背压能力，能够很天然的适应流量弹性的变化。	
 
@@ -214,7 +220,7 @@ tcp也有自己的一套流量控制和拥塞控制算法，所以tcp天生拥�
 
 ​	负责多个Socket连接，当Socket的状态发生变化了，都会通知Selector。Selector会对所有的连接进行轮询（定时任务），做对应事件的事情，所以不会涉及到任何的浪费。
 
-![image-20210901193330804](netty-deep-study/image-20210901193330804.png)
+![image-20210907134214498](netty-deep-study/image-20210907134214498.png)
 
 #### Selector API
 
@@ -347,13 +353,80 @@ telnet localhost 2020
 
 ##### 案例
 
+```java
+public class Reactor {
+    interface ChannelHandler {
+        public void onRead(SocketChannel channel) throws Exception;
+        public void onAccept();
+    }
+    private static ChannelHandler echo =new ChannelHandler() {
+        @Override
+        public void onRead(SocketChannel socket) throws Exception {
+            final ByteBuffer buffer = ByteBuffer.allocate(256);
+            final int bytesRead = socket.read(buffer);
+            if (bytesRead >0){
+                buffer.flip();
+                socket.write(buffer);
+                buffer.clear();
+            }else  if(bytesRead<0){
+                socket.close();
+                System.out.println("client close");
+            }
+        }
+        @Override
+        public void onAccept() {}
+    };
+    public static void start(int port) throws Exception{
+        //因为是单reactor单线程，所以只有一个信道
+        final   ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
+        //设置非阻塞并且注册端口
+        serverSocketChannel.configureBlocking(false);
+        InetSocketAddress address = new InetSocketAddress(port);
+        serverSocketChannel.bind(address);
+        final Selector selector =Selector.open();
+        SelectionKey sk = serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
+        //连接进来后先进行accept操作
+        sk.attach(new ChannelHandler() {
+            @Override
+            public void onRead(SocketChannel channel) throws Exception {}
 
-
-
-
-![image-20210906083557686](netty-deep-study/image-20210906083557686.png)
-
-![image-20210906083614593](netty-deep-study/image-20210906083614593.png)
+            @Override
+            public void onAccept() {
+                try {
+                    SocketChannel socket = serverSocketChannel.accept();
+                    System.out.println("Accept ！");
+                    System.out.println("接受的socket:"+socket);
+                    socket.configureBlocking(false);
+                    SelectionKey sk = socket.register(selector, 0);
+                    sk.attach(echo);
+                    sk.interestOps(SelectionKey.OP_READ);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+        while (true){ //循环判断状态，根据状态进行操作
+            selector.select();
+            Set<SelectionKey> readKeys = selector.selectedKeys();
+            Iterator<SelectionKey> it = readKeys.iterator();
+            while(it.hasNext()){
+                SelectionKey key = it.next();
+                ChannelHandler handler = (ChannelHandler) key.attachment();
+                if (key.isAcceptable()){
+                    handler.onAccept();
+                }
+                if (key.isReadable()){
+                    handler.onRead((SocketChannel) key.channel());
+                }
+                it.remove();
+            }
+        }
+    }
+    public static void main(String[] args) throws Exception {
+        start(2020);
+    }
+}
+```
 
 ##### 缺点
 

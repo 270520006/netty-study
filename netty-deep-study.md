@@ -499,3 +499,16 @@ Reactor模型具有如下的优点：
 * 可扩展性，可以方便地通过增加Reactor实例个数来充分利用CPU资源；
 * 可复用性，Reactor模型本身与具体事件处理逻辑无关，具有很高的复用性。
 
+#### 手写Reactor模式的存在的问题
+
+* 处理op_write事件:写忙时需要注册op_write,
+* 不忙时注销op_write
+* 处理byteBuffer: byteBuffer API非常难用
+* 处理粘包:需要记录接收到的字节状态处理多个selector
+* 提供优雅的业务编程模型
+* 配置运行参数
+
+  从上面可以看到，手写Reactor存在种种问题，这会使得我们使用NIO的时候寸步难行，所以这里就引入了Netty这个框架作为方便我们使用NIO的一种形式。
+
+### Netty
+

@@ -539,3 +539,4 @@ ps：特别注意，runAllTasks和processSelectedKeys不能用阻塞的代码。
 * ChannelHandle：进行事件的处理，例如channelRead或channelActive
 * ChannelPipeline（流水线）：里面包含了很多的Handle，是netty封装好的一个流水线。
 
+![image-20210914083845734](netty-deep-study/image-20210914083845734.png)

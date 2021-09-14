@@ -489,6 +489,7 @@ Nginx、Swoole、Memcached和Netty都是采用这种实现。
 
 * 多线程切换在没有那么高并发的情况下，花销特别大。
 * 需要的硬件配置比先前两个高了
+* 并不好判断从哪里截取字节用来转译
 
 #### 总结
 
@@ -499,16 +500,42 @@ Reactor模型具有如下的优点：
 * 可扩展性，可以方便地通过增加Reactor实例个数来充分利用CPU资源；
 * 可复用性，Reactor模型本身与具体事件处理逻辑无关，具有很高的复用性。
 
-#### 手写Reactor模式的存在的问题
-
-* 处理op_write事件:写忙时需要注册op_write,
-* 不忙时注销op_write
-* 处理byteBuffer: byteBuffer API非常难用
-* 处理粘包:需要记录接收到的字节状态处理多个selector
-* 提供优雅的业务编程模型
-* 配置运行参数
-
-  从上面可以看到，手写Reactor存在种种问题，这会使得我们使用NIO的时候寸步难行，所以这里就引入了Netty这个框架作为方便我们使用NIO的一种形式。
-
 ### Netty
+
+#### Netty核心概念
+
+* Channel：对应NIO的SocketChannel
+
+* EventLoop：对应NIO的Selector
+* ChannelPipeline：业务逻辑
+* ChannelHandler：业务逻辑
+* Boostrap：可以选择阻塞或者非阻塞，可以选择有几个selector
+* ByteBuffer：用来存储发送过来的字节
+* Codec：  帮我们做编码解码工作
+
+#### EventLoop
+
+​	EventLoop=线程+selector，在nodeJs里面也有用到，EventLoop顾名思义就是不停的轮询。
+
+* select()：原本的select()
+* processSelectedKeys()：处理IO事件（最重要的地方）
+* runAllTasks：处理应用层代码
+* task queue：用于存放task，当存放的task和当前线程相符就会拿出来执行。
+
+ps：特别注意，runAllTasks和processSelectedKeys不能用阻塞的代码。
+
+整体模型如下图所示：
+
+![image-20210913155653072](netty-deep-study/image-20210913155653072.png)
+
+#### EventLoopGroup
+
+为了提高更高的处理效率，引入了EventLoop组（selector的名字就叫多路复用），模型如下图所示：
+
+![image-20210913162042769](netty-deep-study/image-20210913162042769.png)
+
+#### ChannelHandler&Pipeline  
+
+* ChannelHandle：进行事件的处理，例如channelRead或channelActive
+* ChannelPipeline（流水线）：里面包含了很多的Handle，是netty封装好的一个流水线。
 

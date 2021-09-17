@@ -7,12 +7,12 @@
   * Socket协议
   * BIO & NIO
   * Reactor模式
-  
+
 * Netty
 
-    * Netty核心组件介绍
-    * Netty部分源码分析
-    * 处理粘包
+  * Netty核心组件介绍
+  * Netty部分源码分析
+  * 处理粘包
 
 
 
@@ -24,7 +24,7 @@
 
 * tcp与http不同，tcp是基于字节流的，将数据转成一个个封包发送，而http是一次性将所有数据发送，当成一个请求。
 
-*  为什么要有“连接”?“连接”究竟是什么?
+* 为什么要有“连接”?“连接”究竟是什么?
 
 * Byte stream oriented vs Message oriented
 
@@ -445,10 +445,15 @@ public class Reactor {
 ​	消息处理流程：
 
 * Reactor对象通过Select监控客户端请求事件，收到事件后通过dispatch进行分发。
+
 * 如果是建立连接请求事件，则由acceptor通过accept处理连接请求，然后创建一个Handler对象处理连接完成后续的各种事件。
+
 * 如果不是建立连接事件，则Reactor会分发调用连接对应的Handler来响应。
+
 * Handler只负责响应事件，不做具体业务处理，通过Read读取数据后，会分发给后面的Worker线程池进行业务处理。
+
 * Worker线程池会分配独立的线程完成真正的业务处理，如何将响应结果发给Handler进行处理。
+
 * Handler收到响应结果后通过send将响应结果返回给Client。
 
   相对于第一种模型来说，在处理业务逻辑，也就是获取到IO的读写事件之后，交由线程池来处理，handler收到响应后通过send将响应结果返回给客户端。这样可以降低Reactor的性能开销，从而更专注的做事件分发工作了，提升整个应用的吞吐。
@@ -536,7 +541,317 @@ ps：特别注意，runAllTasks和processSelectedKeys不能用阻塞的代码。
 
 #### ChannelHandler&Pipeline  
 
-* ChannelHandle：进行事件的处理，例如channelRead或channelActive
+* ChannelHandle：进行事件的处理，例如channelRead或channelActive，ChannelHandle被分为了两种类型：
+  * ChannellnboundHandler：处理对于程序而言，外部的事件
+    * 内置头handleCtx：每个流程都得进过这个头结点的handle
+    * 内置尾TailCtx：每个流程都得以TailCtx结束
+  * ChannelOutboundHandler：处理对于程序而言，内部的事件
+
+对于每个Handler，netty可以帮我们处理byteBuf或Message，处理好以后按原本的格式输出。![image-20210915112754706](netty-deep-study/image-20210915112754706.png)
+
 * ChannelPipeline（流水线）：里面包含了很多的Handle，是netty封装好的一个流水线。
 
 ![image-20210914083845734](netty-deep-study/image-20210914083845734.png)
+
+#### 运行过程
+
+整体过程：事件->selector->信道channel->流水線pipeline->走handler流程
+
+![image-20210915113231276](netty-deep-study/image-20210915113231276.png)
+
+#### 生命周期
+
+* channelRegistered：注册事件
+* channelActive：检查信道是否活跃
+* channelInactive：信道不活跃
+* channelUnregistered：取消注册的事件
+
+![image-20210915114300137](netty-deep-study/image-20210915114300137.png)
+
+#### 各组件之间的关系
+
+* EVentLoopGroup和EventLoop：1对N，没什么讲的，就像线程和线程池一样
+* EventLoop和Thread：1对1，为了保证执行的快，不会引起线程间的通信的问题
+* EventLoop和Channel：1对N，轮询每个信道，这也就是为什么信道不能阻塞的原因，因为一旦阻塞，单线程的EventLoop就会一直等待到当前这个线程执行完毕
+* Channel和ChannelPipeline：1对1，一个Channel只能有一个ChannelPipeline
+* ChannelPipeline和ChannelHandle：1对N的关系，一个ChannelPipeline内有多个ChannelHandle参与流程
+* ChannelHandle和ChannelPipeline：1对N，一个ChannelHandle可以被多个ChannelPipeline调用使用
+
+#### 案例
+
+​	学了那么多基础知识，写个案例巩固下，写完案例后着手开始源码学习。项目结构如下：
+
+![image-20210915200743539](netty-deep-study/image-20210915200743539.png)
+
+EchoHandler代码如下：
+
+```java
+/**
+ * ChannelInboundHandlerAdapter 主动帮我们去使用下一个handler
+ * 不用关注于下一个handler的执行
+ */
+public class EchoHandler extends ChannelInboundHandlerAdapter {
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg)  {
+        String in=(String) msg;
+        ctx.channel().writeAndFlush(in);
+        ReferenceCountUtil.release(msg);
+    }
+}
+```
+
+IProtocalHandler代码如下：
+
+```java
+public class IProtocalHandler extends ChannelInboundHandlerAdapter {
+
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, final Object msg) throws Exception {
+        int sleep = 500 * new Random().nextInt(5);
+        System.out.println("sleep:" + sleep);
+        Thread.sleep(sleep);
+
+        final ByteBuf buf = (ByteBuf) msg;
+        char c1 = (char) buf.readByte();
+        char c2 = (char) buf.readByte();
+
+        if (c1 != 'J' || c2 != 'W') {
+            ctx.fireExceptionCaught(new Exception("magic error"));
+            return ;
+        }
+
+        buf.readShort();//skip length
+
+        String outputStr = buf.toString(CharsetUtil.UTF_8);
+        System.out.println(outputStr);
+
+        ctx.channel().writeAndFlush(outputStr+"\n");
+
+    }
+}
+```
+
+PipelinePrintHandler代码如下：
+
+```java
+/**
+ * ChannelInboundHandlerAdapter 主动帮我们去使用下一个handler
+ * 不用关注于下一个handler的执行
+ */
+public class PipelinePrintHandler extends ChannelInboundHandlerAdapter {
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        super.channelActive(ctx);
+        System.out.println(ctx.pipeline().names());
+    }
+}
+```
+
+PrintInboundHandler代码如下：
+
+```java
+public class PrintInboundHandler implements ChannelInboundHandler {
+    private final String id ;
+
+    public PrintInboundHandler(String id) {
+        this.id = id;
+    }
+
+    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+        System.out.println("handlerAdded " + id);
+
+    }
+
+    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        System.out.println("handlerRemoved "+ id);
+
+    }
+
+    public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
+        System.out.println("channelRegistered "+ id);
+        ctx.fireChannelRegistered();
+
+    }
+
+    public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        System.out.println("channelUnregistered "+ id);
+        ctx.fireChannelUnregistered();
+
+    }
+
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        System.out.println("channelActive "+ id);
+        ctx.fireChannelActive();
+
+    }
+
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        System.out.println("channelInactive "+ id);
+        ctx.fireChannelInactive();
+    }
+
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        System.out.println("channelRead "+ id);
+        ctx.fireChannelRead(msg);
+        //ctx.channel().pipeline().fireChannelRead(msg);
+    }
+
+    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+        System.out.println("channelReadComplete "+ id);
+        ctx.fireChannelReadComplete();
+    }
+
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        System.out.println("userEventTriggered "+ id);
+
+    }
+
+    public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+        System.out.println("channelWritabilityChanged "+ id);
+
+    }
+
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        System.out.println("exceptionCaught "+ id);
+
+    }
+
+}
+```
+
+Server代码如下：
+
+```java
+public class Server {
+
+    private static  void use(ChannelPipeline pipeline, Consumer<ChannelPipeline> strategy){
+        strategy.accept(pipeline);
+    }
+    private static Consumer<ChannelPipeline> echo= p ->{
+        p.addLast(
+                new LineBasedFrameDecoder(80,false,false),
+                new StringDecoder(),
+                new EchoHandler(),
+                new PipelinePrintHandler(),
+                new StringEncoder(StandardCharsets.UTF_8)
+        );
+    };
+    private  static Consumer<ChannelPipeline> print =p -> {
+      p.addLast(
+              new PrintInboundHandler("id1")
+      );
+    };
+
+    private static  Consumer<ChannelPipeline> decode= p->{
+      p.addLast(new LengthFieldBasedFrameDecoder(1024,2,2,-2,0))
+        .addLast(new DefaultEventExecutorGroup(16),new IProtocalHandler())
+        .addLast(new StringEncoder(CharsetUtil.UTF_8));
+    };
+
+    private static  void start(int port) throws InterruptedException {
+        // bossGroups,是专门做accept功能用的
+        EventLoopGroup bossGroup = new NioEventLoopGroup();
+        //workerGroup,对应read、send等其他操作
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        try {
+            ServerBootstrap b=new ServerBootstrap();
+            b.group(bossGroup,workerGroup);
+            b.channel(NioServerSocketChannel.class);
+            b.childHandler(new ChannelInitializer() {
+                @Override
+                protected void initChannel(Channel ch) throws Exception {
+                    use(ch.pipeline(), echo);
+                }
+            });
+            ChannelFuture f=b.bind(port).sync();
+            f.channel().closeFuture().sync();
+        } finally {
+            bossGroup.shutdownGracefully();
+            workerGroup.shutdownGracefully();
+        }
+
+    }
+    public static void main(String[] args) throws InterruptedException {
+        start(2020);
+    }
+}
+
+```
+
+#### 源码解析
+
+​	由于netty框架的源码很多，这里对照着NIO着重讲一下源码：
+
+* Register: AbstractChannel.register0
+* Accept:ServerBootstrapAcceptor
+* Read:NioByteUnsafe.read()
+* Write:AbstractChannel.flush0()
+
+##### Register
+
+* 进入到AbstractChannel中，查看register0方法：
+
+```java
+private void register0(ChannelPromise promise) {
+            try {
+                // 检查注册过程中，信道是否还打开
+                // 因为当寄存器调用在eventLoop之外时，它可能同时被关闭
+                if (!promise.setUncancellable() || !ensureOpen(promise)) {
+                    return;
+                }
+                boolean firstRegistration = neverRegistered;
+                doRegister();
+                neverRegistered = false;
+                registered = true;
+
+                // 确保handlerAdded可以被调用
+                // 用户可能已经通过ChannelFutureListener中的管道触发了事件
+                pipeline.invokeHandlerAddedIfNeeded();
+
+                safeSetSuccess(promise);
+                pipeline.fireChannelRegistered();
+                // 只有在通道从未注册的情况下才触发channelActive。这可以防止重复使用
+                // 如果信道被重新注册或注销，则重新激活信道，
+                if (isActive()) {
+                    if (firstRegistration) {
+                        pipeline.fireChannelActive();
+                    } else if (config().isAutoRead()) {
+                        // 信道已经被注册并且已经设置了autoRead，意味着要进入读状态
+                        beginRead();
+                    }
+                }
+            } catch (Throwable t) {
+                // 关闭信道，防止FD泄露
+                closeForcibly();
+                closeFuture.setClosed();
+                safeSetFailure(promise, t);
+            }
+        }
+```
+
+* 进入doRegister查看其实现类AbstractNioChannel
+
+```java
+protected void doRegister() throws Exception {
+    boolean selected = false;
+    for (;;) {
+        try {
+            //这里就是NIO底层注册信道的方法
+            selectionKey = javaChannel().register(eventLoop().unwrappedSelector(), 0, this);
+            return;
+        } catch (CancelledKeyException e) {
+            if (!selected) {
+                // Force the Selector to select now as the "canceled" SelectionKey may still be
+                // cached and not removed because no Select.select(..) operation was called yet.
+                eventLoop().selectNow();
+                selected = true;
+            } else {
+                // We forced a select operation on the selector before but the SelectionKey is still cached
+                // for whatever reason. JDK bug ?
+                throw e;
+            }
+        }
+    }
+}
+```
+

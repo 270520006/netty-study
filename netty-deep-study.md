@@ -854,4 +854,215 @@ protected void doRegister() throws Exception {
     }
 }
 ```
+##### Selector
+
+​	注册完成后进入选择器，按着上面注册的源码和我一起进入selector中：
+
+右键点击eventLoop->EventLoop接口->NioEventLoop
+
+![image-20210918152347564](netty-deep-study/image-20210918152347564.png)
+
+![image-20210918152524993](netty-deep-study/image-20210918152524993.png)
+
+​	进入到NioEventLoop中，找到run这个方法，我把run方法归纳为三个功能：
+
+* 通过select()检测IO事件
+* 通过processSelectedKeys()处理IO事件
+* runAllTasks()处理线程任务队列
+
+流程图解为下图，接下去讲讲源码。
+
+![image-20210918160632989](netty-deep-study/image-20210918160632989.png)
+
+run方法，源码讲解：
+
+```java
+    protected void run() {
+          // 永久循环
+        for (;;) {
+            try {
+  				  // ------------------------- 1 selector选择 -------------------
+                  // 计算出选择selector策略
+                switch (selectStrategy.calculateStrategy(selectNowSupplier, hasTasks())) {
+                    case SelectStrategy.CONTINUE:// NioEventLoop不支持，所以检测到直接退出
+                        continue;
+                    case SelectStrategy.SELECT://NioEventLoop支持的唯一策略
+       				 // 若执行这里，说明当前任务队列中没有任务
+                     //通过cas操作标识select方法的唤醒状态，执行select操作
+                        select(wakenUp.getAndSet(false));
+					//(...)这里原本有一堆注释的，因为太占空间删了
+                        if (wakenUp.get()) {
+                    // 若当前线程刚被唤醒，selector立即将其选择的结果返回给我们
+                            selector.wakeup();
+                        }
+                    default:
+                    // fallthrough
+                }
+                    // ioRatio用于控制IO处理与任务队列中任务的处理所占时间比例
+                cancelledKeys = 0;
+                needsToSelectAgain = false;
+                final int ioRatio = this.ioRatio;
+                if (ioRatio == 100) { //这里和下面的区别在于，io的比例
+                    try {
+                        processSelectedKeys();
+                    } finally {
+                        // Ensure we always run tasks.
+                        runAllTasks();
+                    }
+                } else {
+                    // ------------------------- 2 处理就绪的IO -------------------
+                    // 获取当前时间，即就绪channel的IO开始执行的时间点
+                    final long ioStartTime = System.nanoTime();
+                    try {
+                    // 处理就绪channel的IO
+                        processSelectedKeys();
+                    } finally {
+					// ------------------------- 3 执行任务队列中的任务 -------------------
+                    // IO操作总用时
+                        final long ioTime = System.nanoTime() - ioStartTime;
+                    // ioTime * (100 - ioRatio) / ioRatio 为任务队列中的任务执行可以使用的时长
+                        runAllTasks(ioTime * (100 - ioRatio) / ioRatio);
+                    }
+                }
+            } catch (Throwable t) {
+                handleLoopException(t);
+            }
+            // Always handle shutdown even if the loop processing threw an exception.
+            try {
+                if (isShuttingDown()) {
+                    closeAll();
+                    if (confirmShutdown()) {
+                        return;
+                    }
+                }
+            } catch (Throwable t) {
+                handleLoopException(t);
+            }
+        }
+    }
+```
+
+​	总结：整个过程就是SELECT事件-->processSelectedKeys()-->runAllTasks。先选择SELECT策略，通过processSelectedKeys()方法去获取selector对象，最后根据ioRatio（IO处理与任务队列中任务的处理所占时间比例）选择对应的runAllTasks进行处理。
+
+滑轮点击进入processSelectedKeys方法中:根据selectedKeys是否为空对其进行相应操作
+
+* selectedKeys不为空：调用优化后的方法
+* selectedKeys为空：调用普通方法,传入selector的key，使用迭代器进行循环放入 
+
+```java
+private void processSelectedKeys() {
+    if (selectedKeys != null) { //如果selectedKeys不为空则调用优化后的方法
+        processSelectedKeysOptimized();，selectedKeys
+    } else {//为空则调用普通方法
+        processSelectedKeysPlain(selector.selectedKeys());
+    }
+}
+```
+
+先进入优化后的方法processSelectedKeysOptimized()：
+
+```java
+private void processSelectedKeysOptimized() {
+			// 当无网络事件发生时，selectedKeys.size=0, 不会发生处理行为
+        for (int i = 0; i < selectedKeys.size; ++i) {
+            // 当有网络事件发生时，selectedKeys 为各就绪事件
+            final SelectionKey k = selectedKeys.keys[i];
+            //  数组输出空项, 从而允许在channel 关闭时对其进行垃圾回收
+            // See https://github.com/netty/netty/issues/2363
+            //数组中当前循环对应的keys质空, 这种感兴趣的事件只处理一次就行
+            selectedKeys.keys[i] = null;
+            final Object a = k.attachment();
+			//获取出 attachment,默认情况下就是注册进Selector时,传入的第三个参数  this===>   NioServerSocketChannel
+    		// todo 一个Selector中可能被绑定上了成千上万个Channel,  通过Key+attachment 的手段, 精确的取出发生指定事件的channel, 进而获取channel中的unsafe类进行下一步处理
+            if (a instanceof AbstractNioChannel) {
+            //进入这个方法, 传进入 感兴趣的key + NioSocketChannel
+            //如果是AbstractNioChannel，转换成相应的channel, 调用
+                processSelectedKey(k, (AbstractNioChannel) a);
+            } else {
+                @SuppressWarnings("unchecked")
+                NioTask<SelectableChannel> task = (NioTask<SelectableChannel>) a;
+                processSelectedKey(k, task);
+            }
+
+            if (needsToSelectAgain) {
+                // null out entries in the array to allow to have it GC'ed once the Channel close
+                // See https://github.com/netty/netty/issues/2363
+                selectedKeys.reset(i + 1);
+                selectAgain();
+                i = -1;
+            }
+        }
+    }
+```
+
+滑轮点击processSelectedKey方法，继续深入查看,比较重要的就以下两步：
+
+* OP_WRITE:使用  ch.unsafe().forceFlush()将字节流刷进读写里
+* OP_READ和OP_ACCEPT：使用 unsafe.read()进行读取， unsafe.read()内置判断是否为ACCEPT，所以也可以处理ACCEPT事件。
+
+```java
+//处理具体的socket
+private void processSelectedKey(SelectionKey k, AbstractNioChannel ch) {
+    final AbstractNioChannel.NioUnsafe unsafe = ch.unsafe();
+    if (!k.isValid()) {
+        final EventLoop eventLoop;
+        try {
+            eventLoop = ch.eventLoop();
+        } catch (Throwable ignored) {
+            // If the channel implementation throws an exception because there is no event loop, we ignore this
+            // because we are only trying to determine if ch is registered to this event loop and thus has authority
+            // to close ch.
+            return;
+        }
+        // Only close ch if ch is still registered to this EventLoop. ch could have deregistered from the event loop
+        // and thus the SelectionKey could be cancelled as part of the deregistration process, but the channel is
+        // still healthy and should not be closed.
+        // See https://github.com/netty/netty/issues/5125
+        if (eventLoop != this || eventLoop == null) {
+            return;
+        }
+        // close the channel if the key is not valid anymore
+        unsafe.close(unsafe.voidPromise());
+        return;
+    }
+        // 取出就绪事件类型进行判断
+    try {
+        int readyOps = k.readyOps();
+        // We first need to call finishConnect() before try to trigger a read(...) or write(...) as otherwise
+        // the NIO JDK channel implementation may throw a NotYetConnectedException.
+        if ((readyOps & SelectionKey.OP_CONNECT) != 0) {
+            // remove OP_CONNECT as otherwise Selector.select(..) will always return without blocking
+            // See https://github.com/netty/netty/issues/924
+            int ops = k.interestOps();
+            ops &= ~SelectionKey.OP_CONNECT;
+            k.interestOps(ops);
+
+            unsafe.finishConnect();
+        }
+
+        // Process OP_WRITE first as we may be able to write some queued buffers and so free memory.
+        // 如果是写事件，则强制channel写数据
+        if ((readyOps & SelectionKey.OP_WRITE) != 0) {
+            // 读取数据, OP_READ, OP_ACCEPT 会进入到此处，事件处理从此开始
+            // Call forceFlush which will also take care of clear the OP_WRITE once there is nothing left to write
+            ch.unsafe().forceFlush();
+        }
+
+        // Also check for readOps of 0 to workaround possible JDK bug which may otherwise lead
+        // to a spin loop
+        // 读取数据, OP_READ, OP_ACCEPT 会进入到此处，事件处理从此开始
+        //这里会发现Accept和read的事件处理都放在同一个判断中
+        if ((readyOps & (SelectionKey.OP_READ | SelectionKey.OP_ACCEPT)) != 0 || readyOps == 0) {
+            unsafe.read();
+        }
+    } catch (CancelledKeyException ignored) {
+        unsafe.close(unsafe.voidPromise());
+    }
+}
+```
+
+图解过程：
+
+![image-20210922171021185](netty-deep-study/image-20210922171021185.png)
+
 

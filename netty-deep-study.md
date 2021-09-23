@@ -1064,5 +1064,153 @@ private void processSelectedKey(SelectionKey k, AbstractNioChannel ch) {
 图解过程：
 
 ![image-20210922171021185](netty-deep-study/image-20210922171021185.png)
+###### Accept
+
+按照流程图，鼠标滑轮点击上面源码里的Read（或者叫Accept）t过程中的unsafe：
+
+![image-20210923102536925](netty-deep-study/image-20210923102536925.png)
+
+接着再点击NioUnsafe：
+
+![image-20210923102631504](netty-deep-study/image-20210923102631504.png)
+
+选择接口实现类NioMessageUnsafe:
+
+![image-20210923102718268](netty-deep-study/image-20210923102718268.png)
+
+找到read事件,这里最重要的是doReadMessages这个方法：
+
+![image-20210923104024536](netty-deep-study/image-20210923104024536.png)
+
+点击进入doReadMessages，找到实现类NioserverSocketChannel：
+
+![image-20210923104140911](netty-deep-study/image-20210923104140911.png)
+
+到这里，就找到目的地了：
+
+```java
+@Override
+protected int doReadMessages(List<Object> buf) throws Exception {
+      // 接收客户端连接
+    SocketChannel ch = SocketUtils.accept(javaChannel());
+    try {
+        if (ch != null) {
+             // netty创建自己的客户端channel
+            buf.add(new NioSocketChannel(this, ch));
+            return 1;
+        }
+    } catch (Throwable t) {
+        logger.warn("Failed to create a new channel from an accepted socket.", t);
+        try {
+            ch.close();
+        } catch (Throwable t2) {
+            logger.warn("Failed to close a socket.", t2);
+        }
+    }
+    return 0;
+}
+```
+
+接下去按三下shift键，搜索ServerBootstrap这个类：
+
+![image-20210923113349643](netty-deep-study/image-20210923113349643.png)
+
+然后找到类里的方法channelRead:当客户端连接请求后，会在这将Handle事件加上
+
+```java
+public void channelRead(ChannelHandlerContext ctx, Object msg) {
+    // 获取child channel
+    final Channel child = (Channel) msg;
+	//在这个部分，会把我们所写的handle加载到channel.pipeline
+    child.pipeline().addLast(childHandler);
+	// 设置childOptions到child channel
+    setChannelOptions(child, childOptions, logger);
+	// 设置childAttrs到child channel
+    for (Entry<AttributeKey<?>, Object> e: childAttrs) {
+        child.attr((AttributeKey<Object>) e.getKey()).set(e.getValue());
+    }
+	// 设置childAttrs到child channel 
+    try {
+        childGroup.register(child).addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture future) throws Exception {
+                if (!future.isSuccess()) {
+                    forceClose(child, future.cause());
+                }
+            }
+        });
+    } catch (Throwable t) {
+        forceClose(child, t);
+    }
+}
+```
+
+###### Read
+
+回到上面部分的NioUnsafe接口，选择接口实现类AbstractNioByteChannel:
+
+![image-20210923152557344](netty-deep-study/image-20210923152557344.png)
+
+找到run方法：读到的信息，通过 pipeline.fireChannelRead(byteBuf)传递给信道上
+
+```java
+public final void read() {
+    final ChannelConfig config = config();
+    final ChannelPipeline pipeline = pipeline();
+    final ByteBufAllocator allocator = config.getAllocator();
+    final RecvByteBufAllocator.Handle allocHandle = recvBufAllocHandle();
+    allocHandle.reset(config);
+
+    ByteBuf byteBuf = null;
+    boolean close = false;
+    try {
+        do {
+            //1、分配内存给 ByteBuf
+            byteBuf = allocHandle.allocate(allocator);
+            // 2、读取 Socket 数据到 ByteBuf，这里默认会尝试读取 1024 字节的数据。
+            allocHandle.lastBytesRead(doReadBytes(byteBuf));
+            //3、如果 lastBytesRead 方法返回-1，表示 Channel 已关闭，这时释放当前 ByteBuf 引用，准备关闭 Channel
+            if (allocHandle.lastBytesRead() <= 0) {
+                // 4、nothing was read. release the buffer.
+                byteBuf.release();
+                byteBuf = null;
+                close = allocHandle.lastBytesRead() < 0;
+                break;
+            }
+
+            allocHandle.incMessagesRead(1);
+            readPending = false;
+            //5、使用读取到的数据，触发 ChannelPipeline#fireChannelRead，通常我们在这里处理数据。
+            pipeline.fireChannelRead(byteBuf);
+            byteBuf = null;
+            //6、判断是否需要继续读取数据。
+        } while (allocHandle.continueReading());
+		//7、预留方法，提供给 RecvByteBufAllocator 做一些扩展操作
+        allocHandle.readComplete();
+        //8、触发 ChannelPipeline#fireChannelReadComplete，例如将前面多次读取到的数据转换为一个对象。
+        pipeline.fireChannelReadComplete();
+
+        if (close) {
+            //关闭 Channel
+            closeOnRead(pipeline);
+        }
+    } catch (Throwable t) {
+        handleReadException(pipeline, byteBuf, t, close, allocHandle);
+    } finally {
+        // Check if there is a readPending which was not processed yet.
+        // This could be for two reasons:
+        // * The user called Channel.read() or ChannelHandlerContext.read() in channelRead(...) method
+        // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
+        //
+        // See https://github.com/netty/netty/issues/2254
+        if (!readPending && !config.isAutoRead()) {
+            removeReadOp();
+        }
+    }
+}
+```
+
+###### Write
+
 
 

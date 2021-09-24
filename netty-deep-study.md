@@ -1209,8 +1209,234 @@ public final void read() {
     }
 }
 ```
+###### write
 
-###### Write
+接下去按三下shift键，搜索AbstractChannel这个类，找到flush0这个方法：
+
+```java
+protected void flush0() {
+    //刚完成Flush操作
+    if (inFlush0) {
+        // Avoid re-entrance
+        return;
+    }
+	//拿到buffer队列
+    final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+    // 如果buffer队列啥都没有，直接返回
+    if (outboundBuffer == null || outboundBuffer.isEmpty()) {
+        return;
+    }
+	// 表示正在flush	
+    inFlush0 = true;
+
+    // Mark all pending write requests as failure if the channel is inactive.
+    //发送数据前链路检查,如果channel失效了，则标记写操作为失败
+    if (!isActive()) {
+        try {
+            if (isOpen()) {
+    //true 通知 handler channelWritabilityChanged方法              
+                outboundBuffer.failFlushed(FLUSH0_NOT_YET_CONNECTED_EXCEPTION, true);
+            } else {
+                // Do not trigger channelWritabilityChanged because the channel is closed already.
+                outboundBuffer.failFlushed(FLUSH0_CLOSED_CHANNEL_EXCEPTION, false);
+            }
+        } finally {
+            inFlush0 = false;
+        }
+        return;
+    }
+
+    try {
+        //调用channel实现,flush数据至底层socket
+        doWrite(outboundBuffer);
+    } catch (Throwable t) {
+        if (t instanceof IOException && config().isAutoClose()) {
+            /**
+             * Just call {@link #close(ChannelPromise, Throwable, boolean)} here which will take care of
+             * failing all flushed messages and also ensure the actual close of the underlying transport
+             * will happen before the promises are notified.
+             *
+             * This is needed as otherwise {@link #isActive()} , {@link #isOpen()} and {@link #isWritable()}
+             * may still return {@code true} even if the channel should be closed as result of the exception.
+             */
+            close(voidPromise(), t, FLUSH0_CLOSED_CHANNEL_EXCEPTION, false);
+        } else {
+            outboundBuffer.failFlushed(t, true);
+        }
+    } finally {
+        inFlush0 = false;
+    }
+}
+```
+
+滑轮点击doWrite，找到接口实现类NioSocketChannel：
+
+![image-20210924143058195](netty-deep-study/image-20210924143058195.png)
+
+接着找到doWrite方法，这里提一嘴三种情况：
+
+* 第一种情况：如果socketChannel.write方法返回0，则表示本次没有写入任何字节，设置setOpwrite=true，此时直接跳出,表示需要注册写事件，下次写事件达到时再处理，此时done=flase;setOpWrite为true;incompleteWrite方法会被调用，由于setOpWrite为true,只需要简单的关注写事件。
+* 第二种情况：expectedWrittenBytes 为0，表示在允许的循环次数内，完成了内容的写入操作，此时设置done为true,不会调用incompleteWrite方法，但会执行代码取消写事件。
+* 第三种情况，达到配置允许的最大写次数后，默认为16次，数据还未写完，此时setOpWrite=false,done:false,执行incompleteWrite方法的else分支，放入到任务队列中，等该IO线程处理完其他的key,然后会再运行。在讲解线程模型时http://blog.csdn.net/prestigeding/article/details/64443479，我们应该知道，NioEventLoop会首先执行选择键(select)，然后处理建processSelectedKey(),然后会执行runAllTask方法，这里的runAllTask方法就是运行在此处加入的任务，从整个select,然后再执行processSelectedKey，再到runAllTask方法，全部在同一个IO线程中执行，故在Netty中，Channel，IO Handler都是线程安全的。包括这里的ChannelOutboundBuffer，写缓存区。
+
+```java
+protected void doWrite(ChannelOutboundBuffer in) throws Exception {
+    for (;;) {
+        int size = in.size();
+        if (size == 0) {
+            // All written so clear OP_WRITE
+            clearOpWrite();
+            break;
+        }
+        long writtenBytes = 0;
+        boolean done = false;
+        boolean setOpWrite = false;
+
+        // Ensure the pending writes are made of ByteBufs only.		
+        // 根据前面设置的指针，取到要flush的buffer段
+        ByteBuffer[] nioBuffers = in.nioBuffers();
+        int nioBufferCnt = in.nioBufferCount();
+        long expectedWrittenBytes = in.nioBufferSize();
+        // 拿到jdk原生channel
+        SocketChannel ch = javaChannel();
+
+        // Always us nioBuffers() to workaround data-corruption.
+        // See https://github.com/netty/netty/issues/2761
+        // 下面三种case最终都是将之前write方法写到缓存队列的数据再写到底层socket
+       // 即发送给客户端
+        switch (nioBufferCnt) {
+            case 0:
+      // 最终还是会调用到case1或default的write方法，只不过是多做了些特殊处理。
+                super.doWrite(in);
+                return;
+            case 1:
+                // Only one ByteBuf so use non-gathering write
+                ByteBuffer nioBuffer = nioBuffers[0];
+                // 自旋，默认自旋16次。这个时候会将writeSpinCount变量减去每次返回的值，一旦发生了写失败，会直接结束这个循环。如果没有发生写失败，就会执行16次这个循环，最后执行 incompleteWrite(writeSpinCount < 0);方法，这个方法中传入writeSpinCount < 0
+                for (int i = config().getWriteSpinCount() - 1; i >= 0; i --) {
+// 向底层socket(channel)输出数据，并返回输出的量，已经是jdk底层的方法了。
+// 执行完下面这个方法后，我们的telnet就能看到返回结果了。
+                    final int localWrittenBytes = ch.write(nioBuffer);
+                    if (localWrittenBytes == 0) {
+                        setOpWrite = true;
+                        break;
+                    }
+                    expectedWrittenBytes -= localWrittenBytes;
+                    writtenBytes += localWrittenBytes;
+                    if (expectedWrittenBytes == 0) {
+                        done = true;
+                        break;
+                    }
+                }
+                break;
+            // 若待刷buffer为其它情况
+            default:
+                for (int i = config().getWriteSpinCount() - 1; i >= 0; i --) {
+                    final long localWrittenBytes = ch.write(nioBuffers, 0, nioBufferCnt);
+                    if (localWrittenBytes == 0) {
+                        setOpWrite = true;
+                        break;
+                    }
+                    expectedWrittenBytes -= localWrittenBytes;
+                    writtenBytes += localWrittenBytes;
+                    if (expectedWrittenBytes == 0) {
+                        done = true;
+                        break;
+                    }
+                }
+                break;
+        }
+
+        // Release the fully written buffers, and update the indexes of the partially written buffer.
+         // 指针复位、清空buffer、元素置空(GC)等操作
+        in.removeBytes(writtenBytes);
+
+        if (!done) {
+            // Did not write all buffers completely.
+            //如果到这里还没写完，会触发incompleteWrite
+            incompleteWrite(setOpWrite);
+            break;
+        }
+    }
+}
+```
+
+如果到最后，缓冲区满了，还没有完成写操作，会进行incompleteWrite()方法，滑轮点击进入该方法进行分析：
+
+*  setOpWrite()：采用这个方法把状态转变为OP_WRITE，然后在进行操作
+
+```java
+protected final void incompleteWrite(boolean setOpWrite) {
+    // Did not write completely.
+    if (setOpWrite) {
+        setOpWrite();//这个方法会把状态改成OP_WRITE，等到CPU资源空闲时再次调用write
+    } else {
+        // Schedule flush again later so other tasks can be picked up in the meantime
+        Runnable flushTask = this.flushTask;
+        if (flushTask == null) {
+            flushTask = this.flushTask = new Runnable() {
+                @Override
+                public void run() {
+                    flush();
+                }
+            };
+        }
+        eventLoop().execute(flushTask);
+    }
+}
+```
+
+接着进入setOpWrite再次进行源码查看：这里netty帮我们考虑好了，不用担心非阻塞下，写事件被忽略。
+
+* 因为写忙，在上面的循环16次中也没有将其写完，此时会把未完成的事件注册一个OP_WRITE
+
+```java
+protected final void setOpWrite() {
+    final SelectionKey key = selectionKey();
+    // Check first if the key is still valid as it may be canceled as part of the deregistration
+    // from the EventLoop
+    // See https://github.com/netty/netty/issues/2104
+    if (!key.isValid()) {
+        return;
+    }
+    final int interestOps = key.interestOps();
+    if ((interestOps & SelectionKey.OP_WRITE) == 0) {
+        key.interestOps(interestOps | SelectionKey.OP_WRITE); //这里不是或，这是位操作
+    }
+}
+```
+
+至此netty源码，我们看完了，接下来我们来看下，netty是这么解决粘包和拆包问题的。
+
+#### 粘包和拆包问题
+
+##### 什么是粘包和拆包？
+
+​	产生粘包和拆包问题的主要原因是，操作系统在发送TCP数据的时候，底层会有一个缓冲区，例如1024个字节大小，如果一次请求发送的数据量比较小，没达到缓冲区大小，TCP则会将多个请求合并为同一个请求进行发送，这就形成了粘包问题；如果一次请求发送的数据量比较大，超过了缓冲区大小，TCP就会将其拆分为多次发送，这就是拆包，也就是将一个大的包拆分为多个小包进行发送。如下图展示了粘包和拆包的一个示意图：
+
+![img](netty-deep-study/9727275-b000ba603482447e.png)
+
+上图中演示了粘包和拆包的三种情况：
+
+- A和B两个包都刚好满足TCP缓冲区的大小，或者说其等待时间已经达到TCP等待时长，从而还是使用两个独立的包进行发送；
+- A和B两次请求间隔时间内较短，并且数据包较小，因而合并为同一个包发送给服务端；
+- B包比较大，因而将其拆分为两个包B_1和B_2进行发送，而这里由于拆分后的B_2比较小，其又与A包合并在一起发送。
+
+##### 常见解决方案
+
+对于粘包和拆包问题，常见的解决方案有四种：
+
+- 客户端在发送数据包的时候，每个包都固定长度，比如1024个字节大小，如果客户端发送的数据长度不足1024个字节，则通过补充空格的方式补全到指定长度；
+- 客户端在每个包的末尾使用固定的分隔符，例如\r\n，如果一个包被拆分了，则等待下一个包发送过来之后找到其中的\r\n，然后对其拆分后的头部部分与前一个包的剩余部分进行合并，这样就得到了一个完整的包；
+- 将消息分为头部和消息体，在头部中保存有当前整个消息的长度，只有在读取到足够长度的消息之后才算是读到了一个完整的消息；
+- 通过自定义协议进行粘包和拆包的处理。
+
+##### 案例
+
+这里我们使用自定义协议进行粘包和拆包的处理：
+
+![image-20210924165154984](netty-deep-study/image-20210924165154984.png)
+
 
 
 

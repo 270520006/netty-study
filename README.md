@@ -22,3 +22,9 @@
 10、准备写一个netty的demo，然后开始深入netty源码
 
 11、完成了netty的demo，发现对netty使用还不是太熟悉，打算边看源码，边在写点demo
+
+12、查看了netty的Register的源码解析，并做了笔记
+
+13、学习了Selector部分的源码，深入学习Read&Accept部分
+
+14、正在学read和write部分的源码，这里学完就正式完成了netty的源码学习

@@ -28,3 +28,5 @@
 13、学习了Selector部分的源码，深入学习Read&Accept部分
 
 14、正在学read和write部分的源码，这里学完就正式完成了netty的源码学习
+
+15、已经学完了netty源码，不过太久有点忘了

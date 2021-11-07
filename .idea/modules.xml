@@ -2,6 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/chatroom/chatroom.iml" filepath="$PROJECT_DIR$/chatroom/chatroom.iml" />
       <module fileurl="file://$PROJECT_DIR$/nacos_oepnfeign/nacos_oepnfeign.iml" filepath="$PROJECT_DIR$/nacos_oepnfeign/nacos_oepnfeign.iml" />
       <module fileurl="file://$PROJECT_DIR$/nacos_study/nacos_study.iml" filepath="$PROJECT_DIR$/nacos_study/nacos_study.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/netty-study.iml" filepath="$PROJECT_DIR$/.idea/netty-study.iml" />

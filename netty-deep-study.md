@@ -729,11 +729,11 @@ public class Server {
     }
     private static Consumer<ChannelPipeline> echo= p ->{
         p.addLast(
-                new LineBasedFrameDecoder(80,false,false),
-                new StringDecoder(),
-                new EchoHandler(),
-                new PipelinePrintHandler(),
-                new StringEncoder(StandardCharsets.UTF_8)
+                new LineBasedFrameDecoder(80,false,false), //按行分割String
+                new StringDecoder(),//把bytr自动转成string
+                new EchoHandler(), //自己写的
+                new PipelinePrintHandler(),//自己写的
+                new StringEncoder(StandardCharsets.UTF_8)//编码格式
         );
     };
     private  static Consumer<ChannelPipeline> print =p -> {

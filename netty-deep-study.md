@@ -749,9 +749,9 @@ public class Server {
     };
 
     private static  void start(int port) throws InterruptedException {
-        // bossGroups,是专门做accept功能用的
+        // bossGroups,是专门做accept功能用的，对应mainReactor，是负责接受接收的selector
         EventLoopGroup bossGroup = new NioEventLoopGroup();
-        //workerGroup,对应read、send等其他操作
+        //workerGroup,对应read、send等其他操作，对应subreactor，是负责进行相应操作的selector
         EventLoopGroup workerGroup = new NioEventLoopGroup();
         try {
             ServerBootstrap b=new ServerBootstrap();

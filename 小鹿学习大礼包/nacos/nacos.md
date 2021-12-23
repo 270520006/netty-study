@@ -298,4 +298,4 @@ public int xiaozhuzhu(){
 
 ps:需获取配置中的值时，需加上@RefreshScope注解
 
-接下来就到小璐表演时间了，我会在一旁协助，带小璐学习dubbo的使用。
+正在尝试学习openfeign的bean加载过程
